@@ -64,11 +64,34 @@ class Monkey(object):
         if hasattr(self, '_monkey_running') and self.running == True:
             logger.warn(u'monkey process have started,not need start')
             return
-        self.monkey_cmd = 'monkey -p %s -v -v -v -s 1000 ' \
-                          '--ignore-crashes --ignore-timeouts --ignore-security-exceptions ' \
-                          '--kill-process-after-error --pct-appswitch 20 --pct-touch 40 ' \
-                          '--pct-motion 10 --pct-trackball 0 --pct-anyevent 10 --pct-flip 0 --pct-pinchzoom 0 ' \
-                          '--throttle 1000 %s' % (package, str(timeout))
+            
+        # 记录启动信息
+        logger.info("Starting monkey test for package: " + package)
+        logger.info("Timeout: " + str(timeout) + " minutes")
+        
+        # 构建基本的 Monkey 命令
+        base_monkey_cmd = 'monkey -p %s -v -v -v -s 1000 ' \
+                     '--ignore-crashes --ignore-timeouts --ignore-security-exceptions ' \
+                     '--pct-touch 60 ' \
+                     '--pct-motion 30 ' \
+                     '--pct-trackball 0 ' \
+                     '--pct-nav 0 ' \
+                     '--pct-majornav 0 ' \
+                     '--pct-appswitch 5 ' \
+                     '--pct-flip 0 ' \
+                     '--pct-anyevent 5 '
+        
+        # 根据配置决定是否添加 --pct-syskeys 0 参数
+        if hasattr(RuntimeData, 'config_dic') and RuntimeData.config_dic.get('monkey_disable_syskeys', True):
+            base_monkey_cmd += '--pct-syskeys 0 '
+            logger.info("Disabling system keys in Monkey test")
+        
+        # 构建完整的命令，替换包名和添加超时时间
+        self.monkey_cmd = base_monkey_cmd % package
+        self.monkey_cmd += ' --throttle 1000 %d' % int(timeout)
+        logger.info("Monkey command: " + self.monkey_cmd)
+        
+        # 执行命令
         self._log_pipe = self.device.adb.run_shell_cmd(self.monkey_cmd, sync=False)
         self._monkey_thread = threading.Thread(target=self._monkey_thread_func, args=[RuntimeData.package_save_path])
         # self._monkey_thread.setDaemon(True)
