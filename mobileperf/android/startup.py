@@ -134,6 +134,9 @@ class StartUp(object):
         config_dic = self.check_config_option(config_dic, paser, "Common", "monkey")
         config_dic = self.check_config_option(config_dic, paser, "Common", "main_activity")
         config_dic = self.check_config_option(config_dic, paser, "Common", "activity_list")
+        config_dic = self.check_config_option(config_dic, paser, "Common", "monkey_disable_syskeys")
+        # 单独的页面监控间隔时间
+        config_dic = self.check_config_option(config_dic, paser, "Common", "monitor_interval")
 
         logger.debug(config_dic)
         return config_dic
@@ -143,7 +146,7 @@ class StartUp(object):
 
             try:
                 config_dic[option] = parse.get(section, option)
-                if option == 'frequency':
+                if option == 'frequency' or option == 'monitor_interval':
                     config_dic[option] = (int)(parse.get(section, option))
                 if option == 'dumpheap_freq':#dumpheap 的单位是分钟
                     config_dic[option] = (int)(parse.get(section, option))*60
@@ -155,6 +158,8 @@ class StartUp(object):
                         config_dic[option] = parse.get(section, option).strip().replace("\n","").split(";")
                     else:
                         config_dic[option] = parse.get(section, option).split(";")
+                if option == 'monkey_disable_syskeys':
+                    config_dic[option] = parse.get(section, option).lower() == 'true'
             except:#配置项中数值发生错误
                 if option != 'serialnum':
                     logger.debug("config option error:"+option)
@@ -162,11 +167,14 @@ class StartUp(object):
                 else:
                     config_dic[option] = ''
         else:#配置项没有配置
-            if option not in ['serialnum',"main_activity","activity_list","pid_change_focus_package","shell_file"]:
+            if option not in ['serialnum',"main_activity","activity_list","pid_change_focus_package","shell_file","monkey_disable_syskeys"]:
                 logger.debug("config option error:" + option)
                 self._config_error()
             else:
-                config_dic[option] = ''
+                if option == 'monkey_disable_syskeys':
+                    config_dic[option] = False  # 默认不禁用系统按键
+                else:
+                    config_dic[option] = ''
         return config_dic
 
     def _config_error(self):
@@ -213,8 +221,10 @@ class StartUp(object):
             if self.config_dic["monkey"] == "true":
                 self.add_monitor(Monkey(self.serialnum, self.packages[0]))
             if self.config_dic["main_activity"] and self.config_dic["activity_list"]:
-                self.add_monitor(DeviceMonitor(self.serialnum, self.packages[0], self.frequency,self.config_dic["main_activity"],
-                                               self.config_dic["activity_list"],RuntimeData.exit_event))
+                # 使用配置中的 monitor_interval 参数，如果不存在则使用默认值 1
+                monitor_interval = self.config_dic.get("monitor_interval", 1)
+                self.add_monitor(DeviceMonitor(self.serialnum, self.packages[0], monitor_interval, self.config_dic["main_activity"],
+                                               self.config_dic["activity_list"], RuntimeData.exit_event))
 
             if len(self.monitors):
                 start_time = TimeUtils.getCurrentTimeUnderline()

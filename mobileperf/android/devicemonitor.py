@@ -32,6 +32,7 @@ class DeviceMonitor(object):
         ''''
         :param list main_activity 指定模块的主入口
         :param list activity_list : 限制默认范围的activity列表，默认为空，则不限制
+        :param float interval: 监控间隔时间，单位秒，默认为1秒
         '''
         self.uninstall_flag = event
         self.device = AndroidDevice(device_id)
