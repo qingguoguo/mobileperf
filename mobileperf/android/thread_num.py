@@ -52,15 +52,31 @@ class ThreadNumPackageCollector(object):
 
     def get_process_thread_num(self, process):
         pid = self.device.adb.get_pid_from_pck(self.packagename)
-        out = self.device.adb.run_shell_cmd('ls -lt /proc/%s/task' % pid)
+        if pid is None:
+            return []
+        
         collection_time = time.time()
         logger.debug("collection time in thread_num info is : " + str(collection_time))
+        
+        # 先尝试直接获取（适用于adb root或Android低版本）
+        out = self.device.adb.run_shell_cmd('ls /proc/%s/task 2>/dev/null' % pid)
         if out:
-            # logger.debug("thread num out:"+out)
-            thread_num = len(out.split("\n"))
+            # 统计行数（使用 splitlines() 自动处理换行符，更安全）
+            lines = [line for line in out.splitlines() if line.strip()]
+            thread_num = len(lines)
+            logger.debug(f"Thread count (direct access): {thread_num}")
             return [collection_time,self.packagename,pid,thread_num]
-        else:
-            return []
+        
+        # 如果直接获取失败，尝试使用su权限
+        out = self.device.adb.run_shell_cmd('su 0 sh -c "ls /proc/%s/task 2>/dev/null"' % pid)
+        if out:
+            lines = [line for line in out.splitlines() if line.strip()]
+            thread_num = len(lines)
+            logger.debug(f"Thread count (via su): {thread_num}")
+            return [collection_time,self.packagename,pid,thread_num]
+        
+        logger.warning(f"Failed to get thread count for PID {pid}")
+        return []
 
     def _collect_thread_num_thread(self, start_time):
         end_time = time.time() + self._timeout
