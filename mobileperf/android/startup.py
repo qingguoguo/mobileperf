@@ -214,9 +214,46 @@ class StartUp(object):
             # 软件方式 获取电量不准，已用硬件方案测试功耗
             # self.add_monitor(PowerMonitor(self.serialnum, self.frequency,self.timeout))
             self.add_monitor(FPSMonitor(self.serialnum,self.packages[0],self.frequency,self.timeout))
-            # 6.0以下能采集到fd数据，7.0以上没权限
-            if self.device.adb.get_sdk_version() <= 23:
-                self.add_monitor(FdMonitor(self.serialnum, self.packages[0], self.frequency,self.timeout))
+            # fd监控：需要root权限才能访问/proc/pid/fd（Android 4.3+都受SELinux限制）
+            sdk_version = self.device.adb.get_sdk_version()
+            has_root = False
+            try:
+                # 方法1：检查当前shell用户是否是root
+                id_result = self.device.adb.run_shell_cmd("id")
+                if id_result and "uid=0(root)" in id_result:
+                    has_root = True
+                    logger.info("ADB is running as root (adb root)")
+                else:
+                    # 方法2：尝试使用su获取root权限
+                    su_id_result = self.device.adb.run_shell_cmd("su 0 id")
+                    if su_id_result and "uid=0(root)" in su_id_result:
+                        has_root = True
+                        logger.info("Su root permission available, attempting adb root...")
+                        # 尝试执行adb root以提升权限
+                        try:
+                            # adb root需要在PC端执行，不是shell命令
+                            adb_root_result = self.device.adb._run_cmd_once("root")
+                            # 等待adb root生效
+                            import time
+                            time.sleep(2)  # 增加等待时间，确保adb root生效
+                            id_check = self.device.adb.run_shell_cmd("id")
+                            if id_check and "uid=0(root)" in id_check:
+                                logger.info("Successfully switched to adb root mode")
+                            else:
+                                logger.info("adb root verification failed, will use su command for fd collection")
+                        except Exception as e:
+                            logger.debug(f"adb root execution failed: {e}")
+                    else:
+                        logger.info(f"No root permission available for Android {sdk_version}")
+            except Exception as e:
+                logger.debug(f"Root check failed: {e}")
+            
+            if has_root:
+                self.add_monitor(FdMonitor(self.serialnum, self.packages[0], self.frequency, self.timeout))
+                logger.info(f"Added FdMonitor for Android {sdk_version}")
+            else:
+                logger.warning(f"Skipping FdMonitor for Android {sdk_version} without root permission")
+            
             self.add_monitor(ThreadNumMonitor(self.serialnum,self.packages[0],self.frequency,self.timeout))
             if self.config_dic["monkey"] == "true":
                 self.add_monitor(Monkey(self.serialnum, self.packages[0]))
