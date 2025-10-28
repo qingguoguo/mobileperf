@@ -60,7 +60,7 @@ class DataWorker(object):
         logger.debug("DataWorker started...")
 
     def stop(self):
-        if self.dataworker_thread.isAlive():
+        if self.dataworker_thread.is_alive():
             self._stop_event.set()
             self.dataworker_thread.join(timeout=1)
             self.dataworker_thread = None

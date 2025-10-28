@@ -55,7 +55,7 @@ class DeviceMonitor(object):
         # logger.debug("DeviceMonitor uninstaller checker has started...")
 
     def stop(self):
-        if self.activity_monitor_thread.isAlive():
+        if self.activity_monitor_thread.is_alive():
             self.stop_event.set()
             self.activity_monitor_thread.join(timeout=1)
             self.activity_monitor_thread = None

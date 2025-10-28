@@ -216,7 +216,7 @@ class PowerCollector(object):
         :return:
         '''
         logger.debug("INFO: PowerCollector  stop...")
-        if (self.collect_power_thread.isAlive()):
+        if (self.collect_power_thread.is_alive()):
             self._stop_event.set()
             self.collect_power_thread.join(timeout=1)
             self.collect_power_thread = None

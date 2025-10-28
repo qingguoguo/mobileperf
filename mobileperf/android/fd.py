@@ -41,7 +41,7 @@ class FdInfoPackageCollector(object):
 
     def stop(self):
         logger.debug("INFO: FdInfoPackageCollector stop... ")
-        if (self.collect_fd_thread.isAlive()):
+        if (self.collect_fd_thread.is_alive()):
             self._stop_event.set()
             self.collect_fd_thread.join(timeout=1)
             self.collect_fd_thread = None
@@ -51,18 +51,33 @@ class FdInfoPackageCollector(object):
 
     def get_process_fd(self, process):
         pid = self.device.adb.get_pid_from_pck(self.packagename)
+        if pid is None:
+            return []
+        
         global old_pid
         # pid发生变化 ，更新old_pid,这个时间间隔长
         if None == RuntimeData.old_pid or RuntimeData.old_pid!=pid:
             RuntimeData.old_pid = pid
-        out = self.device.adb.run_shell_cmd('ls -lt /proc/%s/fd' % pid)
+        
         collection_time = time.time()
         logger.debug("collection time in fd info is : " + str(collection_time))
-        if out:
-            fd_num = len(out.split("\n"))
+        
+        # 先尝试直接获取（适用于adb root或Android 6.0及以下）
+        out = self.device.adb.run_shell_cmd('ls /proc/%s/fd 2>/dev/null | wc -l' % pid)
+        if out and out.strip().isdigit():
+            fd_num = int(out.strip())
+            logger.debug(f"FD count (direct access): {fd_num}")
             return [collection_time,self.packagename,pid,fd_num]
-        else:
-            return []
+        
+        # 如果直接获取失败，尝试使用su权限
+        out = self.device.adb.run_shell_cmd('su 0 sh -c "ls /proc/%s/fd 2>/dev/null | wc -l"' % pid)
+        if out and out.strip().isdigit():
+            fd_num = int(out.strip())
+            logger.debug(f"FD count (via su): {fd_num}")
+            return [collection_time,self.packagename,pid,fd_num]
+        
+        logger.warning(f"Failed to get FD count for PID {pid}")
+        return []
 
     def _collect_fd_thread(self, start_time):
         end_time = time.time() + self._timeout

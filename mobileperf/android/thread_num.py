@@ -42,7 +42,7 @@ class ThreadNumPackageCollector(object):
 
     def stop(self):
         logger.debug("INFO: ThreadNumPackageCollector stop... ")
-        if (self.collect_thread_num_thread.isAlive()):
+        if (self.collect_thread_num_thread.is_alive()):
             self._stop_event.set()
             self.collect_thread_num_thread.join(timeout=1)
             self.collect_thread_num_thread = None

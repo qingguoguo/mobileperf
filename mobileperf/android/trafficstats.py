@@ -442,7 +442,7 @@ class TrafficCollecor(object):
 
     def stop(self):
         logger.debug("INFO: TrafficCollecor  stop...")
-        if (self.collect_traffic_thread.isAlive()):
+        if (self.collect_traffic_thread.is_alive()):
             self._stop_event.set()
             self.collect_traffic_thread.join(timeout=1)
             self.collect_traffic_thread = None

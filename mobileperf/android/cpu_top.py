@@ -286,7 +286,7 @@ class CpuCollector(object):
         :return:
         '''
         logger.debug("INFO: CpuCollector stop...")
-        if (self.collect_package_cpu_thread.isAlive()):
+        if (self.collect_package_cpu_thread.is_alive()):
             self._stop_event.set()
             self.collect_package_cpu_thread.join(timeout=2)
             self.collect_package_cpu_thread = None
