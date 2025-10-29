@@ -234,7 +234,6 @@ class StartUp(object):
                             # adb root需要在PC端执行，不是shell命令
                             adb_root_result = self.device.adb._run_cmd_once("root")
                             # 等待adb root生效
-                            import time
                             time.sleep(2)  # 增加等待时间，确保adb root生效
                             id_check = self.device.adb.run_shell_cmd("id")
                             if id_check and "uid=0(root)" in id_check:
@@ -256,7 +255,7 @@ class StartUp(object):
             
             self.add_monitor(ThreadNumMonitor(self.serialnum,self.packages[0],self.frequency,self.timeout))
             if self.config_dic["monkey"] == "true":
-                self.add_monitor(Monkey(self.serialnum, self.packages[0]))
+                self.add_monitor(Monkey(self.serialnum, self.packages[0], self.timeout))
             if self.config_dic["main_activity"] and self.config_dic["activity_list"]:
                 # 使用配置中的 monitor_interval 参数，如果不存在则使用默认值 1
                 monitor_interval = self.config_dic.get("monitor_interval", 1)
@@ -287,9 +286,10 @@ class StartUp(object):
                         self.logcat_monitor.add_log_handle(self.logcat_monitor.handle_exception)
                     time.sleep(1)
                     self.logcat_monitor.start(start_time)
+                    logger.info("Logcat monitor started")
                 except Exception as e:
-                    logger.error(e)
-
+                    logger.error("Failed to start logcat monitor: %s" % e)
+                
                 timeout = time_out if time_out != None else self.config_dic['timeout']
                 endtime = time.time() + timeout
                 while (time.time() < endtime):#吊着主线程防止线程中断
@@ -330,30 +330,54 @@ class StartUp(object):
                     self.device.adb.delete_file("/data/local/tmp/%s" % file)
 
     def stop(self):
-        for monitor in self.monitors:
-            try:
-                monitor.stop()
-            except Exception as e:  # 捕获所有的异常，防止其中一个monitor的stop操作发生异常退出时，影响其他的monitor的stop操作
-                logger.error(e)
-
+        # 使用 try...finally 确保报告生成一定会执行，即使被 Ctrl+C 中断
         try:
-            if self.logcat_monitor:
-                self.logcat_monitor.stop()
-        except Exception as e:
-            logger.error("stop exception for logcat monitor")
-            logger.error(e)
-        if self.config_dic["monkey"] =="true":
-            self.device.adb.kill_process("com.android.commands.monkey")
-        # 统计测试时长
-        cost_time =round((float) (time.time() - TimeUtils.getTimeStamp(RuntimeData.start_time,TimeUtils.UnderLineFormatter))/3600,2)
-        self.add_device_info("test cost time:",str(cost_time)+"h")
-        # 根据csv生成excel汇总文件
-        Report(RuntimeData.package_save_path,self.packages)
-        self.pull_heapdump()
-        self.pull_log_files()
-        # self.memory_analyse()
-        # self.device.adb.bugreport(RuntimeData.package_save_path)
-        os._exit(0)
+            for monitor in self.monitors:
+                try:
+                    monitor.stop()
+                except (KeyboardInterrupt, SystemExit):
+                    # 如果是中断信号，直接抛出，让外层处理
+                    raise
+                except Exception as e:  # 捕获所有的异常，防止其中一个monitor的stop操作发生异常退出时，影响其他的monitor的stop操作
+                    logger.error(e)
+
+            try:
+                if self.logcat_monitor:
+                    self.logcat_monitor.stop()
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except Exception as e:
+                logger.error("stop exception for logcat monitor")
+                logger.error(e)
+            if self.config_dic["monkey"] =="true":
+                self.device.adb.kill_process("com.android.commands.monkey")
+            # 统计测试时长
+            cost_time =round((float) (time.time() - TimeUtils.getTimeStamp(RuntimeData.start_time,TimeUtils.UnderLineFormatter))/3600,2)
+            self.add_device_info("test cost time:",str(cost_time)+"h")
+        except (KeyboardInterrupt, SystemExit):
+            # 即使被中断，也要生成报告
+            logger.warning("Process interrupted, but will still generate report...")
+        finally:
+            # 根据csv生成excel汇总文件 - 无论是否中断，都要生成报告
+            try:
+                if RuntimeData.package_save_path and os.path.exists(RuntimeData.package_save_path):
+                    logger.info("Generating summary report...")
+                    Report(RuntimeData.package_save_path, self.packages)
+                    logger.info("Summary report generated successfully")
+            except Exception as e:
+                logger.error("Failed to generate report: %s" % e)
+                import traceback
+                logger.error(traceback.format_exc())
+            
+            # 执行清理工作
+            try:
+                self.pull_heapdump()
+                self.pull_log_files()
+            except Exception as e:
+                logger.error("Error during cleanup: %s" % e)
+            # self.memory_analyse()
+            # self.device.adb.bugreport(RuntimeData.package_save_path)
+            os._exit(0)
 
     # windows可能没装 自测用
     def memory_analyse(self):

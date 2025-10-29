@@ -393,6 +393,9 @@ class SurfaceStatsCollector(object):
             results = self.device.adb.run_shell_cmd(
                 'dumpsys SurfaceFlinger --latency %s'%self.focus_window)
             results = results.replace("\r\n","\n").splitlines()
+            if not results or len(results) == 0:
+                logger.warning("SurfaceFlinger latency data is empty, skipping...")
+                return (None, None)
             refresh_period = int(results[0]) / nanoseconds_per_second
             results = self.device.adb.run_shell_cmd('dumpsys gfxinfo %s framestats'%self.package_name)
 #             logger.debug(results)
