@@ -38,6 +38,12 @@ from mobileperf.android.devicemonitor import DeviceMonitor
 from mobileperf.android.monkey import Monkey
 from mobileperf.android.globaldata import RuntimeData
 from mobileperf.android.report import Report
+# 尝试导入 Web 服务器的启动函数（若不可用则忽略，不影响核心功能）
+try:
+    from mobileperf.android.web.web_server import get_or_start_web_server
+    WEB_SERVER_AVAILABLE = True
+except Exception:
+    WEB_SERVER_AVAILABLE = False
 
 class StartUp(object):
 
@@ -184,6 +190,13 @@ class StartUp(object):
     # @profile
     def run(self, time_out=None):
         self.clear_heapdump()
+        # 在任何设备/应用检查之前，优先确保 Web 服务已启动，
+        # 这样即使设备未连接，Web 也可用于查看历史结果、编辑配置、手动控制
+        try:
+            if WEB_SERVER_AVAILABLE:
+                get_or_start_web_server(port=5000)
+        except Exception as e:
+            logger.debug(f"Auto start web server skipped: {e}")
         # objgraph.show_growth()
 #       对设备连接情况的检查
         if not self.serialnum:
@@ -205,6 +218,17 @@ class StartUp(object):
             logger.error("test app not installed:" + self.packages[0])
             return
         try:
+            # 提前创建结果目录，确保即使早停也能生成报告
+            if not RuntimeData.start_time:
+                start_time = TimeUtils.getCurrentTimeUnderline()
+                RuntimeData.start_time = start_time
+                if self.config_dic["save_path"]:
+                    RuntimeData.package_save_path = os.path.join(self.config_dic["save_path"], self.packages[0], start_time)
+                else:
+                    RuntimeData.package_save_path = os.path.join(RuntimeData.top_dir, 'results', self.packages[0], start_time)
+                FileUtils.makedir(RuntimeData.package_save_path)
+                # 先写入初始设备信息文件，后续 stop() 会补充信息
+                self.save_device_info()
             #初始化数据处理的类,将没有消息队列传递过去，以便获取数据，并处理
             # datahandle = DataWorker(self.get_queue_dic())
             # 将queue传进去，与datahandle那个线程交互
@@ -263,14 +287,6 @@ class StartUp(object):
                                                self.config_dic["activity_list"], RuntimeData.exit_event))
 
             if len(self.monitors):
-                start_time = TimeUtils.getCurrentTimeUnderline()
-                RuntimeData.start_time = start_time
-                if self.config_dic["save_path"]:
-                    RuntimeData.package_save_path = os.path.join(self.config_dic["save_path"], self.packages[0], start_time)
-                else:
-                    RuntimeData.package_save_path = os.path.join(RuntimeData.top_dir, 'results', self.packages[0], start_time)
-                FileUtils.makedir(RuntimeData.package_save_path)
-                self.save_device_info()
                 for monitor in self.monitors:
                     #启动所有的monitors
                     try:
@@ -316,7 +332,8 @@ class StartUp(object):
             logger.debug(" catch keyboardInterrupt, goodbye!!!")
             # 收尾工作
             self.stop()
-            os._exit(0)
+            # stop()方法会检查Web服务器状态，如果Web服务器在运行则不会退出进程
+            # 如果没有Web服务器，stop()方法会调用os._exit(0)
         except Exception as e:
             logger.error("Exception in run")
             logger.error(e)
@@ -360,6 +377,15 @@ class StartUp(object):
         finally:
             # 根据csv生成excel汇总文件 - 无论是否中断，都要生成报告
             try:
+                # 若目录未建立，尝试兜底：使用results/<package>/最新时间目录
+                if not RuntimeData.package_save_path:
+                    base_dir = os.path.join(RuntimeData.top_dir, 'results', self.packages[0])
+                    if os.path.isdir(base_dir):
+                        # 选择时间戳最大的目录
+                        candidates = [os.path.join(base_dir, d) for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+                        if candidates:
+                            candidates.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+                            RuntimeData.package_save_path = candidates[0]
                 if RuntimeData.package_save_path and os.path.exists(RuntimeData.package_save_path):
                     logger.info("Generating summary report...")
                     Report(RuntimeData.package_save_path, self.packages)
@@ -373,10 +399,61 @@ class StartUp(object):
             try:
                 self.pull_heapdump()
                 self.pull_log_files()
+            except KeyboardInterrupt:
+                logger.warning("Cleanup interrupted by user, skipping...")
             except Exception as e:
                 logger.error("Error during cleanup: %s" % e)
             # self.memory_analyse()
             # self.device.adb.bugreport(RuntimeData.package_save_path)
+            
+            # 检查是否有Web服务器在运行
+            # 如果Web服务器在当前进程中运行，需要保持进程运行
+            # 如果Web服务器在独立进程中运行，可以安全退出
+            try:
+                from mobileperf.android.web.web_server import is_port_in_use, _global_web_server
+                if is_port_in_use(5000):
+                    # 优先检查是否是独立后台进程模式
+                    is_background_process = (
+                        _global_web_server is not None and 
+                        hasattr(_global_web_server, '_background_process') and
+                        _global_web_server._background_process is not None
+                    )
+                    
+                    if is_background_process:
+                        # Web服务器在独立后台进程中运行，当前进程可以安全退出
+                        bg_pid = _global_web_server._background_process.pid if hasattr(_global_web_server._background_process, 'pid') else 'unknown'
+                        logger.info(f"Web server is running in a separate background process (PID: {bg_pid})")
+                        logger.info("Access web UI at: http://localhost:5000")
+                        logger.info("This process can exit safely. Web server will continue running.")
+                        os._exit(0)
+                    
+                    # 检查Web服务器是否在当前进程的线程中启动（线程模式）
+                    is_thread_mode = (
+                        _global_web_server is not None and 
+                        hasattr(_global_web_server, 'server_thread') and
+                        _global_web_server.server_thread is not None and
+                        _global_web_server.server_thread.is_alive()
+                    )
+                    
+                    if is_thread_mode:
+                        # Web服务器在当前进程的线程中，需要保持进程运行
+                        logger.info("Web server is running in this process (thread mode)")
+                        logger.info("Access web UI at: http://localhost:5000")
+                        logger.info("Process will keep running for web service.")
+                        logger.info("Note: If you want to stop web server, press Ctrl+C again or kill this process.")
+                        # 不调用os._exit(0)，让主线程自然结束
+                        # 由于Web服务器线程是non-daemon的，Python解释器会保持进程运行
+                        return
+                    else:
+                        # 端口被占用，但没有找到当前进程的实例
+                        # 可能是之前的独立进程在运行，当前进程可以安全退出
+                        logger.info("Web server is running on port 5000 (likely in a separate process)")
+                        logger.info("This process can exit safely.")
+                        os._exit(0)
+            except Exception as e:
+                logger.debug(f"Failed to check web server status: {e}")
+            
+            # 如果没有Web服务器或检查失败，正常退出
             os._exit(0)
 
     # windows可能没装 自测用
@@ -444,7 +521,44 @@ if __name__ == "__main__":
     # multiprocessing.freeze_support()
     #startup = StartUp("351BBJN3DJC8","com.taobao.taobao",2)
     startup = StartUp()
-    startup.run()
+    
+    try:
+        startup.run()
+    except KeyboardInterrupt:
+        # 处理在run()执行期间（测试运行中）的Ctrl+C
+        logger.info("\nTest interrupted by user")
+        startup.stop()
+        
+        # stop()之后检查Web服务器是否在当前进程中运行
+        try:
+            from mobileperf.android.web.web_server import _global_web_server
+            if (_global_web_server is not None and 
+                _global_web_server.server_thread is not None and
+                _global_web_server.server_thread.is_alive()):
+                logger.info("\nWeb server is still running in this process.")
+                logger.info("Access at: http://localhost:5000")
+                logger.info("Press Ctrl+C again to stop web server and exit.")
+                logger.info("Or leave it running and use it independently.")
+                # 设置信号处理，允许用户再次按Ctrl+C停止
+                import signal
+                def graceful_exit(sig, frame):
+                    logger.info("\nStopping web server and exiting...")
+                    import sys
+                    sys.exit(0)
+                signal.signal(signal.SIGINT, graceful_exit)
+                # 保持进程运行（等待Web服务器线程）
+                try:
+                    _global_web_server.server_thread.join()
+                except KeyboardInterrupt:
+                    logger.info("\nExiting...")
+        except Exception:
+            pass
+    
+    # 如果run()正常返回了，说明测试正常结束
+    # stop()方法会检查Web服务器状态：
+    # - 如果Web服务器在当前进程中运行，stop()会return而不调用os._exit(0)
+    # - 此时主线程自然结束，由于Web服务器线程是non-daemon的，Python会保持进程运行
+    # - 但用户按Ctrl+C时，需要在这里处理信号，而不是让进程直接退出
     # RuntimeData.start_time = "2019_03_07_10_57_58"
     # RuntimeData.package_save_path = "/Users/look/Desktop/project/mobileperf-mac/results/com.alibaba.ailabs.genie.contacts/2019_03_07_10_57_58"
     # RuntimeData.start_time = "2019_03_07_10_54_59"

@@ -25,6 +25,12 @@ from mobileperf.common.utils import TimeUtils,FileUtils
 from mobileperf.common.log import logger
 from mobileperf.android.globaldata import RuntimeData
 
+try:
+    from mobileperf.android.web.web_server import get_or_start_web_server
+    WEB_SERVER_AVAILABLE = True
+except ImportError:
+    WEB_SERVER_AVAILABLE = False
+
 
 class Monkey(object):
     '''
@@ -50,6 +56,13 @@ class Monkey(object):
         self.start_time = start_time
         if not self.running:
             self.running = True
+            # 确保 Web 服务器运行（如果未运行则启动）
+            if WEB_SERVER_AVAILABLE:
+                try:
+                    get_or_start_web_server(port=5000)
+                except Exception as e:
+                    logger.warning(f"Failed to start web server: {e}")
+            
             # time.sleep(1)
             self.start_monkey(self.package,self.timeout)
 

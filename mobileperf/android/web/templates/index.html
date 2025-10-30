@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MobilePerf Web Control</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+        
+        :root {
+            --bg: #2B2B2B;
+            --bg-elev: #3C3F41;
+            --border: #4B4B4B;
+            --text: #EAEAEA;
+            --text-dim: #87939A;
+            --accent: #C17BB7; /* 用户指定主色 */
+            --accent-2: #6A8759;
+            --error: #CC6666;
+            --warn: #BBB529;
+            --log-text: #EAEAEA; /* 日志正文颜色 */
+        }
+
+        body {
+            font-family: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+        }
+        
+        .header {
+            background: var(--bg-elev);
+            border-bottom: 1px solid var(--border);
+            padding: 15px 40px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        
+        h1 {
+            color: var(--text);
+            font-size: 20px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: none;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        h1::before { content: ''; }
+        
+        .search-btn {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 6px 14px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 1px;
+            text-transform: none;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .search-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 255, 0, 0.1);
+            transition: left 0.3s;
+        }
+        
+        .search-btn:hover { background: var(--bg-elev); }
+        
+        .search-btn:hover::before {
+            left: 0;
+        }
+        
+        .search-btn:active {
+            box-shadow: inset 0 0 10px rgba(0, 255, 0, 0.3);
+        }
+        
+        .main-container {
+            min-height: calc(100vh - 80px);
+        }
+        
+        .content-area {
+            padding: 30px 40px;
+            background: transparent;
+        }
+        
+        .search-box {
+            background: var(--bg-elev);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 15px 20px 15px 40px;
+            margin: 0 auto 25px;
+            max-width: 1200px;
+            position: relative;
+        }
+        
+        .search-box::before {
+            content: '$ ';
+            color: #00ff88;
+            position: absolute;
+            left: 20px;
+            top: 15px;
+            font-weight: 700;
+        }
+        
+        .search-input {
+            background: transparent;
+            border: none;
+            color: #00ff00;
+            font-size: 14px;
+            width: 100%;
+            outline: none;
+            font-family: 'JetBrains Mono', monospace;
+            caret-color: #00ff00;
+        }
+        
+        .search-input::placeholder { color: var(--text-dim); }
+        .search-input:focus { color: var(--text); }
+        
+        .results-list {
+            background: var(--bg-elev);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            overflow: hidden;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        /* XLSX 预览优化 */
+        .xlsx-view { overflow: auto; }
+        .xlsx-view table { width: 100%; border-collapse: collapse; table-layout: auto; }
+        .xlsx-view th, .xlsx-view td { border: 1px solid var(--border); padding: 6px 10px; white-space: nowrap; }
+        .xlsx-view td { font-variant-numeric: tabular-nums; }
+        #configEditor:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+        
+        .result-item {
+            background: transparent;
+            border-bottom: 1px solid var(--border);
+            padding: 16px 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            font-family: 'JetBrains Mono', monospace;
+            position: relative;
+        }
+        
+        .result-item::before { content: ''; }
+        .result-item:hover { background: rgba(255,255,255,0.04); padding-left: 20px; }
+        
+        .result-item:hover::before {
+            opacity: 1;
+        }
+        
+        .result-item:last-child {
+            border-bottom: none;
+        }
+        
+        /* 标记异常测试结果 - 指定包名且有异常的行 */
+        .result-item.has-exception-alert {
+            background: rgba(255, 68, 68, 0.15) !important;
+            border-left: 4px solid #ff4444 !important;
+            border-bottom-color: rgba(255, 68, 68, 0.4) !important;
+            padding-left: 16px !important;
+        }
+        
+        .result-item.has-exception-alert:hover {
+            background: rgba(255, 68, 68, 0.22) !important;
+        }
+        
+        .result-item.has-exception-alert .package-name {
+            color: #ff6666 !important;
+            font-weight: 700 !important;
+        }
+        
+        .result-item.has-exception-alert .time {
+            color: #ff8888 !important;
+        }
+        
+        .result-left {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        
+        .package-name {
+            color: var(--text);
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .time {
+            color: var(--text-dim);
+            font-size: 11px;
+            font-weight: 500;
+            white-space: nowrap;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .result-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        
+        .badges {
+            display: flex;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        
+        .badge {
+            padding: 4px 10px;
+            font-size: 10px;
+            border-radius: 0;
+            font-weight: 500;
+            border: none;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .badge.has { background: rgba(255,255,255,0.06); border: 1px solid var(--accent); color: var(--text); cursor: pointer; }
+        .badge.has::before { content: '✓ '; margin-right: 3px; color: var(--accent-2); }
+        .badge.empty { background: rgba(199, 84, 80, 0.15); border: 1px dashed var(--border); color: var(--text-dim); opacity: 1; cursor: default; }
+        
+        .badge.empty::before {
+            content: '✗ ';
+            margin-right: 3px;
+            color: #ff6666;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+        }
+        
+        .modal.active {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-content {
+            background: var(--bg-elev);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            width: 98%;
+            max-width: 1800px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .modal-header {
+            background: rgba(255,255,255,0.04);
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        #modalTitle {
+            color: var(--text);
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: none;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        #modalTitle::before {
+            content: '>>> ';
+            color: #00ff88;
+        }
+        
+        .close-btn {
+            color: var(--text);
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 1;
+            transition: all 0.2s;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            padding: 5px 10px;
+            border: 1px solid transparent;
+        }
+        .close-btn:hover { color: var(--error); }
+        
+        .close-btn::before {
+            content: '[X]';
+        }
+        
+        .modal-body {
+            flex: 1;
+            overflow: auto;
+            padding: 24px;
+        }
+        
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            border-bottom: none;
+            padding-bottom: 0;
+        }
+        
+        .tab {
+            padding: 10px 16px;
+            background: transparent;
+            border: 1px solid transparent;
+            border-bottom: none;
+            color: rgba(0, 255, 0, 0.6);
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            position: relative;
+            margin-bottom: -1px;
+        }
+        
+        .tab::before {
+            content: '[';
+            color: rgba(0, 255, 0, 0.4);
+            margin-right: 4px;
+        }
+        
+        .tab::after {
+            content: ']';
+            color: rgba(0, 255, 0, 0.4);
+            margin-left: 4px;
+        }
+        
+        .tab:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+        
+        .tab.active { color: var(--text); border: none; background: transparent; box-shadow: inset 0 -2px 0 0 var(--accent); }
+        
+        .tab.active::before,
+        .tab.active::after { color: var(--text); }
+        
+        .log-content { background: var(--bg); border: 1px solid var(--border); padding: 20px; font-family: 'JetBrains Mono', 'Menlo', 'Monaco', 'Consolas', monospace; font-size: 12px; line-height: 1.7; white-space: pre-wrap; word-wrap: break-word; max-height: calc(90vh - 200px); min-height: 500px; overflow-y: auto; overflow-x: auto; color: var(--log-text); border-radius: 6px; }
+        .log-content:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+        
+        .log-content::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+        
+        .log-content::-webkit-scrollbar-track {
+            background: #0a0a0a;
+        }
+        
+        .log-content::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 0, 0.3);
+            border: none;
+        }
+        
+        .log-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 0, 0.5);
+        }
+        
+        .loading, .error { text-align: center; padding: 60px 20px; color: var(--text-dim); font-size: 14px; font-family: 'JetBrains Mono', monospace; }
+        .loading::before { content: ''; }
+        
+        @keyframes blink { 0%, 50% { opacity: 1; } 51%, 100% { opacity: 0; } }
+        .error { color: var(--error); }
+        .error::before { content: '[ERROR] '; color: var(--error); }
+        
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: rgba(0, 255, 0, 0.5);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        
+        .empty-state h2 {
+            font-size: 18px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            color: #00ff00;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .empty-state h2::before {
+            content: '>>> ';
+            color: #00ff88;
+        }
+        
+        .empty-state p {
+            font-size: 12px;
+            color: rgba(0, 255, 0, 0.6);
+        }
+        
+        .nav-tabs {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        
+        .nav-tab { padding: 8px 16px; background: var(--bg); border: 1px solid var(--border); color: var(--text-dim); font-size: 12px; font-weight: 500; cursor: pointer; transition: all 0.2s; font-family: 'JetBrains Mono', monospace; border-radius: 4px; }
+        .nav-tab:hover { background: var(--bg-elev); color: var(--text); border-color: var(--border); }
+        .nav-tab.active { background: var(--bg-elev); color: var(--text); border-color: var(--accent); }
+        
+        .page-container {
+            display: none;
+        }
+        
+        .page-container.active {
+            display: block;
+        }
+
+        /* xlsx 预览表格样式 */
+        .xlsx-viewer { overflow: auto; }
+        .xlsx-viewer table { border-collapse: collapse; table-layout: auto; font-family: 'JetBrains Mono', monospace; }
+        .xlsx-viewer th, .xlsx-viewer td { border: 1px solid var(--border); padding: 6px 10px; white-space: nowrap; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>MobilePerf Web Control</h1>
+        <div class="nav-tabs">
+            <div class="nav-tab active" onclick="switchPage('logs')">日志查看</div>
+            <div class="nav-tab" onclick="switchPage('config')">配置管理</div>
+            <div class="nav-tab" onclick="switchPage('control')">测试控制</div>
+        </div>
+    </div>
+    
+    <div class="main-container">
+        <!-- 日志查看页面 -->
+        <div class="page-container active" id="pageLogs">
+            <div class="content-area">
+                <div class="search-box">
+                    <input type="text" class="search-input" id="searchInput" 
+                           placeholder="Search logs (e.g. FATAL, CRASH, ANR...)" />
+                </div>
+                
+                <div class="results-list" id="resultsContainer">
+                    <div class="loading">Loading logs...</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 配置管理页面 -->
+        <div class="page-container" id="pageConfig">
+            <div class="content-area">
+                <div style="max-width: 1400px; margin: 0 auto;">
+                    <h2 style="color: #00ff00; font-size: 16px; margin-bottom: 20px; font-family: 'JetBrains Mono', monospace;">
+                        <span style="color: #00ff88;">>>> </span>配置文件编辑器
+                    </h2>
+                    <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+                        <button id="btnEditConfig" class="search-btn" onclick="editConfig()">编辑</button>
+                        <button id="btnSaveConfig" class="search-btn" onclick="saveConfig()" style="display:none">保存</button>
+                        <button id="btnCancelEdit" class="search-btn" onclick="cancelEditConfig()" style="display:none">取消</button>
+                        <button id="btnReloadConfig" class="search-btn" onclick="reloadConfig()">重新加载</button>
+                    </div>
+                    <textarea id="configEditor" readonly style="
+                        width: 100%;
+                        min-height: 600px;
+                        background: #0a0a0a;
+                        border: 1px solid rgba(0, 255, 0, 0.3);
+                        color: #00ff00;
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 12px;
+                        padding: 20px;
+                        outline: none;
+                        line-height: 1.6;
+                        white-space: pre;
+                        overflow-x: auto;
+                        resize: vertical;
+                    "></textarea>
+                    <div id="configMessage" style="margin-top: 12px; min-height: 20px; font-size: 12px; font-family: 'JetBrains Mono', monospace;"></div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 测试控制页面 -->
+        <div class="page-container" id="pageControl">
+            <div class="content-area">
+                <div style="max-width: 1200px; margin: 0 auto;">
+                    <h2 style="color: #00ff00; font-size: 16px; margin-bottom: 20px; font-family: 'JetBrains Mono', monospace;">
+                        <span style="color: #00ff88;">>>> </span>Monkey测试控制
+                    </h2>
+                    
+                    <div style="background: rgba(0, 255, 0, 0.05); padding: 24px; margin-bottom: 20px; border: 1px solid rgba(0, 255, 0, 0.2);">
+                        <div style="margin-bottom: 16px;">
+                            <div style="color: rgba(0, 255, 0, 0.7); font-size: 12px; margin-bottom: 8px; font-family: 'JetBrains Mono', monospace;">测试状态:</div>
+                            <div id="testStatus" style="color: #00ff00; font-size: 14px; font-weight: 500; font-family: 'JetBrains Mono', monospace;">获取中...</div>
+                        </div>
+                        <div id="testInfo" style="display: none;">
+                            <div style="color: rgba(0, 255, 0, 0.7); font-size: 12px; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace;">包名:</div>
+                            <div id="testPackage" style="color: #e0e0e0; font-size: 12px; margin-bottom: 12px; font-family: 'JetBrains Mono', monospace;"></div>
+                            <div style="color: rgba(0, 255, 0, 0.7); font-size: 12px; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace;">设备:</div>
+                            <div id="testDevice" style="color: #e0e0e0; font-size: 12px; margin-bottom: 12px; font-family: 'JetBrains Mono', monospace;"></div>
+                            <div style="color: rgba(0, 255, 0, 0.7); font-size: 12px; margin-bottom: 4px; font-family: 'JetBrains Mono', monospace;">运行时间:</div>
+                            <div id="testRuntime" style="color: #00ff88; font-size: 14px; font-weight: 500; font-family: 'JetBrains Mono', monospace;"></div>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 12px;">
+                        <button class="search-btn" id="startBtn" onclick="startTest()" style="background: rgba(0, 255, 0, 0.1);">启动测试</button>
+                        <button class="search-btn" id="stopBtn" onclick="stopTest()" style="background: rgba(255, 68, 68, 0.1); color: #ff6666; display: none;">停止测试</button>
+                    </div>
+                    <div id="controlMessage" style="margin-top: 12px; min-height: 20px; font-size: 12px; font-family: 'JetBrains Mono', monospace;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="logModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span id="modalTitle">Log Viewer</span>
+                <span class="close-btn" onclick="closeModal()"></span>
+            </div>
+            <div class="modal-body">
+                <div class="tabs" id="tabs"></div>
+                <div id="logContent" class="log-content">Loading...</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- SheetJS for xlsx preview -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Chart.js for simple line charts -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+        let currentPackage = '';
+        let currentTimestamp = '';
+        let currentTestPackage = null;  // 当前monkey测试的包名
+        
+        async function loadResults() {
+            try {
+                const response = await fetch('/api/results');
+                const results = await response.json();
+                displayResults(results);
+            } catch (error) {
+                document.getElementById('resultsContainer').innerHTML = 
+                    '<div class="error">Error loading logs: ' + error.message + '</div>';
+            }
+        }
+        
+        function displayResults(results) {
+            const container = document.getElementById('resultsContainer');
+            
+            if (results.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h2>No logs found</h2>
+                        <p>Start a test to see logs here</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            container.className = 'results-list';
+            container.innerHTML = results.map(result => {
+                // 判断：如果exception.log文件存在且内容中包含当前monkey测试的包名，则标记该行
+                // 兼容不同的数据类型（字符串'true'、布尔值true、数字1等）
+                const needsAlert = result.exception_contains_package === true || 
+                                   result.exception_contains_package === 'true' ||
+                                   result.exception_contains_package === 1;
+                const alertClass = needsAlert ? ' has-exception-alert' : '';
+                
+                return `
+                <div class="result-item${alertClass}" onclick="viewLog('${result.package}', '${result.timestamp}')">
+                    <div class="result-left">
+                        <div class="package-name">${result.package}</div>
+                        <div class="time">${result.time}</div>
+                    </div>
+                    <div class="result-right">
+                        <div class="badges">
+                            ${result.has_exception 
+                                ? '<span class="badge has" onclick="event.stopPropagation(); viewLogWithTab(\'' + result.package + '\', \'' + result.timestamp + '\', \'exception\');">exception.log</span>' 
+                                : '<span class="badge empty" onclick="event.stopPropagation();">exception.log</span>'}
+                            ${result.has_logcat 
+                                ? '<span class="badge has" onclick="event.stopPropagation(); viewLogWithTab(\'' + result.package + '\', \'' + result.timestamp + '\', \'logcat\');">logcat.txt</span>' 
+                                : '<span class="badge empty" onclick="event.stopPropagation();">logcat.txt</span>'}
+                            ${result.has_report 
+                                ? '<span class="badge has" onclick="event.stopPropagation(); viewReport(\'' + result.package + '\', \'' + result.timestamp + '\');">报告</span>' 
+                                : '<span class="badge empty" onclick="event.stopPropagation();">报告</span>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+            }).join('');
+        }
+        
+        async function viewLog(package, timestamp) {
+            currentPackage = package;
+            currentTimestamp = timestamp;
+            
+            document.getElementById('logModal').classList.add('active');
+            document.getElementById('logContent').textContent = 'Loading...';
+            
+            try {
+                const response = await fetch(`/api/logs/${package}/${timestamp}`);
+                const logs = await response.json();
+                
+                const tabs = document.getElementById('tabs');
+                const content = document.getElementById('logContent');
+                
+                const tabList = [];
+                if (logs.exception) {
+                    tabList.push({
+                        name: 'exception.log',
+                        type: 'exception',
+                        filename: 'exception.log',  // 添加文件名，用于下载
+                        data: logs.exception
+                    });
+                }
+                
+                // 添加所有logcat文件作为tab
+                if (logs.logcat_files && logs.logcat_files.length > 0) {
+                    logs.logcat_files.forEach(fileInfo => {
+                        tabList.push({
+                            name: fileInfo.filename + (fileInfo.size_mb > 0 ? ` (${fileInfo.size_mb}MB)` : ''),
+                            type: 'logcat',
+                            filename: fileInfo.filename,
+                            data: null  // 延迟加载
+                        });
+                    });
+                }
+
+                // 添加所有xlsx汇总文件作为tab
+                if (logs.xlsx_files && logs.xlsx_files.length > 0) {
+                    logs.xlsx_files.forEach(fileInfo => {
+                        tabList.push({
+                            name: fileInfo.filename + (fileInfo.size_mb > 0 ? ` (${fileInfo.size_mb}MB)` : ''),
+                            type: 'xlsx',
+                            filename: fileInfo.filename,
+                            data: null
+                        });
+                    });
+                }
+                
+                tabs.innerHTML = tabList.map((tab, idx) => 
+                    `<div class="tab ${idx === 0 ? 'active' : ''}" onclick="switchTab(${idx})">${tab.name}</div>`
+                ).join('');
+                
+                window.currentTabs = tabList;
+                window.currentPackage = package;
+                window.currentTimestamp = timestamp;
+                
+                // 加载第一个tab的内容
+                if (tabList.length > 0) {
+                    await loadTabContent(0);
+                }
+            } catch (error) {
+                document.getElementById('logContent').innerHTML = 
+                    '<div class="error">Error loading logs: ' + error.message + '</div>';
+            }
+        }
+        
+        // HTML转义函数，防止XSS攻击
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // 高亮显示包含指定包名的异常日志行
+        function highlightExceptionLog(logText, packageName) {
+            if (!logText || !packageName) {
+                return escapeHtml(logText);
+            }
+            const lines = logText.split('\n');
+            const highlightedLines = lines.map(line => {
+                // 检查是否包含当前测试的包名
+                if (line.includes(packageName)) {
+                    // 将包含包名的行标红，同时保留原始文本格式
+                    return '<span style="color: #ff4444; background-color: rgba(255, 68, 68, 0.15); padding: 2px 0; display: block; border-left: 3px solid #ff4444; padding-left: 5px; font-weight: bold;">' + 
+                           escapeHtml(line) + '</span>';
+                }
+                return escapeHtml(line);
+            });
+            return highlightedLines.join('\n');
+        }
+        
+        async function loadTabContent(idx) {
+            const tab = window.currentTabs[idx];
+            const content = document.getElementById('logContent');
+            
+            // 如果数据已经加载，直接显示
+            if (tab.data !== null) {
+                // 对于异常日志，添加下载按钮
+                if (tab.type === 'exception' && window.currentPackage && window.currentTimestamp) {
+                    const filename = tab.filename || 'exception.log';
+                    const downloadUrl = `/api/logfile/${window.currentPackage}/${window.currentTimestamp}/${filename}?download=1`;
+                    // 如果有包名，尝试高亮显示包含包名的行
+                    const logContent = window.currentPackage ? highlightExceptionLog(tab.data, window.currentPackage) : escapeHtml(tab.data);
+                    const htmlContent = `
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:12px;">
+                            <span style="color: var(--text-dim);">${filename}</span>
+                            <a class="search-btn" href="${downloadUrl}">下载文件</a>
+                        </div>
+                        <div class="log-content">${logContent}</div>
+                    `;
+                    content.innerHTML = htmlContent;
+                } else {
+                    content.textContent = tab.data;
+                }
+                return;
+            }
+            
+            // 如果logcat文件需要加载
+            if (tab.type === 'logcat' && tab.filename) {
+                content.textContent = 'Loading...';
+                try {
+                    const response = await fetch(`/api/logcat/${window.currentPackage}/${window.currentTimestamp}/${tab.filename}`);
+                    const result = await response.json();
+                    tab.data = result.content || '';
+                    
+                    // 添加下载按钮
+                    const downloadUrl = `/api/logcat/${window.currentPackage}/${window.currentTimestamp}/${tab.filename}?download=1`;
+                    const htmlContent = `
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:12px;">
+                            <span style="color: var(--text-dim);">${tab.filename}</span>
+                            <a class="search-btn" href="${downloadUrl}">下载文件</a>
+                        </div>
+                        <pre class="log-content" style="white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(tab.data)}</pre>
+                    `;
+                    content.innerHTML = htmlContent;
+                } catch (error) {
+                    content.textContent = 'Error loading file: ' + error.message;
+                }
+            }
+
+            // 如果xlsx文件需要加载并预览
+            if (tab.type === 'xlsx' && tab.filename) {
+                content.textContent = 'Loading...';
+                try {
+                    const url = `/api/xlsx/${window.currentPackage}/${window.currentTimestamp}/${tab.filename}`;
+                    const resp = await fetch(url);
+                    const ab = await resp.arrayBuffer();
+                    const wb = XLSX.read(ab, { type: 'array' });
+
+                    // UI: sheet selector + download
+                    const selectorId = 'sheetSelect_' + Math.random().toString(36).slice(2);
+                    const canvasId = 'sheetChart_' + Math.random().toString(36).slice(2);
+                    const tableId = 'sheetTable_' + Math.random().toString(36).slice(2);
+
+                    const options = wb.SheetNames.map(n => `<option value="${n}">${n}</option>`).join('');
+                    content.innerHTML = `
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:12px;">
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <span style="color: var(--text-dim);">${tab.filename}</span>
+                                <select id="${selectorId}" class="search-input" style="width:auto; padding:4px 8px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+                                    ${options}
+                                </select>
+                            </div>
+                            <a class="search-btn" href="${url}?download=1">下载原文件</a>
+                        </div>
+                        <div style="background: var(--bg-elev); border:1px solid var(--border); padding:8px; margin-bottom:8px;">
+                            <canvas id="${canvasId}" height="160"></canvas>
+                        </div>
+                        <div id="${tableId}" class="log-content xlsx-view" style="background: var(--bg-elev); border:1px solid var(--border);"></div>
+                    `;
+
+                    let chart;
+                    function renderSheet(sheetName){
+                        const ws = wb.Sheets[sheetName];
+                        // 表格
+                        const html = XLSX.utils.sheet_to_html(ws, { editable: false });
+                        document.getElementById(tableId).innerHTML = html;
+
+                        // 简单折线图：拿第一列作为X（若列名包含 time/date 则优先），选择其它数值列作为Y
+                        const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
+                        if (!rows || rows.length === 0){
+                            if (chart) { chart.destroy(); chart = null; }
+                            return;
+                        }
+                        const headers = Object.keys(rows[0] || {});
+                        let xKey = headers.find(h => /time|date/i.test(String(h))) || headers[0];
+                        const yKeys = headers.filter(h => h !== xKey);
+                        // 过滤出数值列
+                        const numericKeys = yKeys.filter(k => rows.some(r => typeof r[k] === 'number'));
+                        if (numericKeys.length === 0){
+                            if (chart) { chart.destroy(); chart = null; }
+                            return;
+                        }
+                        const labels = rows.map(r => r[xKey]);
+                        const ds = numericKeys.slice(0, 5).map((k, idx) => ({
+                            label: String(k),
+                            data: rows.map(r => (typeof r[k] === 'number' ? r[k] : null)),
+                            borderColor: `hsl(${(idx*60)%360} 60% 60%)`,
+                            tension: 0.2,
+                            spanGaps: true,
+                            pointRadius: 0
+                        }));
+                        const ctx = document.getElementById(canvasId).getContext('2d');
+                        if (chart) chart.destroy();
+                        chart = new Chart(ctx, {
+                            type: 'line',
+                            data: { labels, datasets: ds },
+                            options: {
+                                interaction: { mode: 'index', intersect: false },
+                                plugins: { legend: { labels: { color: getComputedStyle(document.body).getPropertyValue('--text') } } },
+                                scales: {
+                                    x: { ticks: { color: getComputedStyle(document.body).getPropertyValue('--text-dim') } },
+                                    y: { ticks: { color: getComputedStyle(document.body).getPropertyValue('--text-dim') } }
+                                }
+                            }
+                        });
+                    }
+
+                    const sel = document.getElementById(selectorId);
+                    sel.addEventListener('change', () => renderSheet(sel.value));
+                    renderSheet(wb.SheetNames[0]);
+                } catch (error) {
+                    content.textContent = 'Error loading xlsx: ' + error.message;
+                }
+            }
+        }
+        
+        async function viewLogWithTab(package, timestamp, tabType) {
+            await viewLog(package, timestamp);
+            // 等待tabs加载完成后，切换到指定的tab
+            setTimeout(() => {
+                if (tabType === 'exception') {
+                    // 切换到第一个tab（exception.log）
+                    if (window.currentTabs && window.currentTabs.length > 0) {
+                        switchTab(0);
+                    }
+                } else if (tabType === 'logcat') {
+                    // 切换到第一个logcat tab
+                    if (window.currentTabs && window.currentTabs.length > 0) {
+                        // 找到第一个logcat tab
+                        let logcatIdx = window.currentTabs.findIndex(tab => tab.type === 'logcat');
+                        if (logcatIdx === -1) {
+                            // 如果没有找到logcat，但可能exception不存在，尝试第二个tab
+                            logcatIdx = window.currentTabs.length > 1 ? 1 : 0;
+                        }
+                        if (logcatIdx >= 0) {
+                            switchTab(logcatIdx);
+                        }
+                    }
+                }
+            }, 100);
+        }
+        
+        async function viewReport(package, timestamp) {
+            await viewLog(package, timestamp);
+            setTimeout(() => {
+                if (window.currentTabs && window.currentTabs.length > 0) {
+                    let idx = window.currentTabs.findIndex(tab => tab.type === 'xlsx');
+                    if (idx === -1) idx = 0;
+                    switchTab(idx);
+                }
+            }, 100);
+        }
+        
+        async function switchTab(idx) {
+            document.querySelectorAll('.tab').forEach((tab, i) => {
+                tab.classList.toggle('active', i === idx);
+            });
+            await loadTabContent(idx);
+        }
+        
+        function closeModal() {
+            document.getElementById('logModal').classList.remove('active');
+        }
+        
+        let searchTimeout;
+        document.getElementById('searchInput').addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            const keyword = this.value.trim();
+            
+            if (keyword.length < 2) {
+                loadResults();
+                return;
+            }
+            
+            searchTimeout = setTimeout(() => {
+                searchLogs(keyword);
+            }, 500);
+        });
+        
+        async function searchLogs(keyword) {
+            const container = document.getElementById('resultsContainer');
+            container.className = '';
+            container.innerHTML = '<div class="loading">Searching...</div>';
+            
+            try {
+                const response = await fetch(`/api/search?keyword=${encodeURIComponent(keyword)}`);
+                const results = await response.json();
+                
+                if (results.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><h2>No matches found</h2></div>';
+                    return;
+                }
+                
+                container.className = 'results-list';
+                container.innerHTML = results.map(result => `
+                    <div class="result-item" onclick="viewLog('${result.package}', '${result.timestamp}')">
+                        <div class="package-name">${result.package}</div>
+                        <div class="time">Line ${result.line}</div>
+                        <div class="result-right" style="color: #999; font-size: 13px; max-width: 500px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                            ${result.content}
+                        </div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                container.innerHTML = '<div class="error">Search error: ' + error.message + '</div>';
+            }
+        }
+        
+        loadResults();
+        setInterval(loadResults, 30000);
+        
+        // 页面切换功能
+        function switchPage(page) {
+            // 切换导航标签
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // 切换页面容器
+            document.querySelectorAll('.page-container').forEach(container => {
+                container.classList.remove('active');
+            });
+            const pageId = 'page' + page.charAt(0).toUpperCase() + page.slice(1);
+            document.getElementById(pageId).classList.add('active');
+            
+            // 根据页面加载相应数据
+            if (page === 'config') {
+                reloadConfig();
+            } else if (page === 'control') {
+                updateTestStatus();
+                // 开始定期更新状态
+                if (window.statusInterval) clearInterval(window.statusInterval);
+                window.statusInterval = setInterval(updateTestStatus, 2000);
+            } else {
+                // 停止状态更新
+                if (window.statusInterval) {
+                    clearInterval(window.statusInterval);
+                    window.statusInterval = null;
+                }
+            }
+        }
+        
+        // 配置管理功能
+        function setConfigEditing(editing) {
+            const editor = document.getElementById('configEditor');
+            const btnEdit = document.getElementById('btnEditConfig');
+            const btnSave = document.getElementById('btnSaveConfig');
+            const btnCancel = document.getElementById('btnCancelEdit');
+            const btnReload = document.getElementById('btnReloadConfig');
+            if (editor) editor.readOnly = !editing;
+            if (btnEdit) btnEdit.style.display = editing ? 'none' : 'inline-block';
+            if (btnSave) btnSave.style.display = editing ? 'inline-block' : 'none';
+            if (btnCancel) btnCancel.style.display = editing ? 'inline-block' : 'none';
+            if (btnReload) btnReload.disabled = editing;
+        }
+
+        function editConfig() {
+            setConfigEditing(true);
+            const msg = document.getElementById('configMessage');
+            if (msg) { msg.textContent = '编辑模式：修改后点击“保存”。'; msg.style.color = 'rgba(0, 255, 0, 0.6)'; }
+        }
+
+        function cancelEditConfig() {
+            reloadConfig();
+            setConfigEditing(false);
+        }
+
+        async function reloadConfig() {
+            const editor = document.getElementById('configEditor');
+            const message = document.getElementById('configMessage');
+            if (!editor || !message) return;
+            
+            message.textContent = '加载中...';
+            message.style.color = 'rgba(0, 255, 0, 0.6)';
+            
+            try {
+                const response = await fetch('/api/config');
+                const data = await response.json();
+                if (data.error) {
+                    message.textContent = '错误: ' + data.error;
+                    message.style.color = '#ff6666';
+                } else {
+                    editor.value = data.content;
+                    message.textContent = '配置已加载';
+                    message.style.color = '#00ff00';
+                    setConfigEditing(false);
+                }
+            } catch (error) {
+                message.textContent = '加载失败: ' + error.message;
+                message.style.color = '#ff6666';
+            }
+        }
+        
+        async function saveConfig() {
+            const editor = document.getElementById('configEditor');
+            const message = document.getElementById('configMessage');
+            if (!editor || !message) return;
+            
+            const content = editor.value;
+            message.textContent = '保存中...';
+            message.style.color = 'rgba(0, 255, 0, 0.6)';
+            
+            try {
+                const response = await fetch('/api/config', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ content: content })
+                });
+                
+                const data = await response.json();
+                if (data.error) {
+                    message.textContent = '错误: ' + data.error;
+                    message.style.color = '#ff6666';
+                } else {
+                    message.textContent = data.message || '配置已保存';
+                    message.style.color = data.requires_restart ? '#ffaa00' : '#00ff00';
+                    await reloadConfig();
+                    setConfigEditing(false);
+                }
+            } catch (error) {
+                message.textContent = '保存失败: ' + error.message;
+                message.style.color = '#ff6666';
+            }
+        }
+        
+        // 测试控制功能
+        async function updateTestStatus() {
+            try {
+                const response = await fetch('/api/monkey/status');
+                const data = await response.json();
+                
+                const statusEl = document.getElementById('testStatus');
+                if (!statusEl) return;
+                
+                if (data.error) {
+                    statusEl.textContent = '错误: ' + data.error;
+                    statusEl.style.color = '#ff6666';
+                    return;
+                }
+                
+                const status = data.status || 'stopped';
+                const statusText = {
+                    'stopped': '已停止',
+                    'running': '运行中',
+                    'starting': '启动中',
+                    'stopping': '停止中'
+                };
+                
+                statusEl.textContent = statusText[status] || status;
+                statusEl.style.color = status === 'running' ? '#00ff00' : 
+                                       status === 'stopped' ? '#999' : '#ffaa00';
+                
+                // 显示/隐藏按钮
+                const startBtn = document.getElementById('startBtn');
+                const stopBtn = document.getElementById('stopBtn');
+                const testInfo = document.getElementById('testInfo');
+                
+                if (status === 'running') {
+                    if (startBtn) startBtn.style.display = 'none';
+                    if (stopBtn) stopBtn.style.display = 'block';
+                    if (testInfo) testInfo.style.display = 'block';
+                    
+                    const packageEl = document.getElementById('testPackage');
+                    const deviceEl = document.getElementById('testDevice');
+                    const runtimeEl = document.getElementById('testRuntime');
+                    if (packageEl) packageEl.textContent = data.package || '-';
+                    if (deviceEl) deviceEl.textContent = data.device || '-';
+                    if (runtimeEl) runtimeEl.textContent = data.run_time || '00:00:00';
+                    
+                    // 保存当前测试包名，用于标记异常结果
+                    currentTestPackage = data.package || null;
+                    // 刷新结果显示以应用高亮
+                    loadResults();
+                } else {
+                    if (startBtn) startBtn.style.display = 'block';
+                    if (stopBtn) stopBtn.style.display = 'none';
+                    if (testInfo) testInfo.style.display = 'none';
+                    // 测试停止后，不清除包名，这样仍然可以高亮显示相关的异常日志
+                    // 只有在获取到新的状态信息时才清除
+                    if (data.package === null || data.package === undefined) {
+                        currentTestPackage = null;
+                    }
+                    // 刷新结果显示
+                    loadResults();
+                }
+            } catch (error) {
+                const statusEl = document.getElementById('testStatus');
+                if (statusEl) {
+                    statusEl.textContent = '获取状态失败: ' + error.message;
+                    statusEl.style.color = '#ff6666';
+                }
+            }
+        }
+        
+        async function startTest() {
+            const message = document.getElementById('controlMessage');
+            if (!message) return;
+            
+            message.textContent = '启动中...';
+            message.style.color = 'rgba(0, 255, 0, 0.6)';
+            
+            try {
+                const response = await fetch('/api/monkey/start', {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                if (data.error) {
+                    message.textContent = '错误: ' + data.error;
+                    message.style.color = '#ff6666';
+                } else {
+                    message.textContent = data.message || '测试已启动';
+                    message.style.color = '#00ff00';
+                    // 立即更新状态
+                    setTimeout(updateTestStatus, 500);
+                }
+            } catch (error) {
+                message.textContent = '启动失败: ' + error.message;
+                message.style.color = '#ff6666';
+            }
+        }
+        
+        async function stopTest() {
+            const message = document.getElementById('controlMessage');
+            if (!message) return;
+            
+            message.textContent = '停止中...';
+            message.style.color = 'rgba(255, 170, 0, 0.8)';
+            
+            try {
+                const response = await fetch('/api/monkey/stop', {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                if (data.error) {
+                    message.textContent = '错误: ' + data.error;
+                    message.style.color = '#ff6666';
+                } else {
+                    message.textContent = data.message || '测试已停止';
+                    message.style.color = '#00ff00';
+                    // 立即更新状态
+                    setTimeout(updateTestStatus, 500);
+                }
+            } catch (error) {
+                message.textContent = '停止失败: ' + error.message;
+                message.style.color = '#ff6666';
+            }
+        }
+        
+        // 页面加载时初始化
+        window.addEventListener('load', function() {
+            // 如果是配置管理页面，加载配置
+            if (document.getElementById('pageConfig') && 
+                document.getElementById('pageConfig').classList.contains('active')) {
+                reloadConfig();
+            }
+            // 如果是测试控制页面，加载状态
+            if (document.getElementById('pageControl') && 
+                document.getElementById('pageControl').classList.contains('active')) {
+                updateTestStatus();
+                window.statusInterval = setInterval(updateTestStatus, 2000);
+            }
+        });
+    </script>
+</body>
+</html>

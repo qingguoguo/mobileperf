@@ -20,6 +20,7 @@ setup(
     install_requires=[
         "requests",
         "urllib3",
+        "Flask>=2.0.0",  # Web server for log viewer
     ],
     description="Python Android mobile perf (support Python3)"
 )
