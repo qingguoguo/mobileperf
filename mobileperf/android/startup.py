@@ -280,11 +280,16 @@ class StartUp(object):
             self.add_monitor(ThreadNumMonitor(self.serialnum,self.packages[0],self.frequency,self.timeout))
             if self.config_dic["monkey"] == "true":
                 self.add_monitor(Monkey(self.serialnum, self.packages[0], self.timeout))
-            if self.config_dic["main_activity"] and self.config_dic["activity_list"]:
+            # 只要配置了 main_activity 就启动页面监控
+            # 如果只配置 main_activity：检测应用是否在前台，不在则拉起应用
+            # 如果同时配置了 activity_list：使用白名单功能，检测当前 Activity 是否在白名单中
+            if self.config_dic["main_activity"]:
                 # 使用配置中的 monitor_interval 参数，如果不存在则使用默认值 1
                 monitor_interval = self.config_dic.get("monitor_interval", 1)
+                # activity_list 如果未配置则为空列表
+                activity_list = self.config_dic.get("activity_list", [])
                 self.add_monitor(DeviceMonitor(self.serialnum, self.packages[0], monitor_interval, self.config_dic["main_activity"],
-                                               self.config_dic["activity_list"], RuntimeData.exit_event))
+                                               activity_list, RuntimeData.exit_event))
 
             if len(self.monitors):
                 for monitor in self.monitors:

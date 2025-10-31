@@ -82,22 +82,39 @@ class DeviceMonitor(object):
                 if self.activity_queue:
                     logger.debug("activity monitor thread activity_list: " + str(activity_list))
                     self.activity_queue.put(activity_list)
-                if self.current_activity:
-                    logger.debug("current activity: " + self.current_activity)
-                    if self.main_activity and self.activity_list:
+                
+                # 情况1: 只配置了 main_activity，没有配置 activity_list - 检测应用是否在前台
+                if self.main_activity and not self.activity_list:
+                    foreground_process = self.device.adb.get_foreground_process()
+                    if foreground_process and foreground_process != self.packagename:
+                        # 应用不在前台，启动 main_activity 拉起应用
+                        start_activity = self.packagename + "/" + self.main_activity[
+                            random.randint(0, len(self.main_activity) - 1)]
+                        logger.debug("app not in foreground (current: %s), starting activity: %s" % (foreground_process, start_activity))
+                        self.device.adb.start_activity(start_activity)
+                
+                # 情况2: 配置了 activity_list（白名单功能）
+                elif self.main_activity and self.activity_list:
+                    if self.current_activity:
+                        logger.debug("current activity: " + self.current_activity)
                         if self.current_activity not in self.activity_list:
                             start_activity = self.packagename + "/" + self.main_activity[
                                 random.randint(0, len(self.main_activity) - 1)]
-                            logger.debug("start_activity:" + start_activity)
+                            logger.debug("activity not in whitelist, starting activity: " + start_activity)
                             self.device.adb.start_activity(start_activity)
+                
+                # 记录当前 Activity 到文件
+                if self.current_activity:
                     activity_tuple=(TimeUtils.getCurrentTime(),self.current_activity)
-                    # 写文件
-                    try:
-                        with open(self.activity_file, 'a+',encoding="utf-8") as writer:
-                            writer_p = csv.writer(writer, lineterminator='\n')
-                            writer_p.writerow(activity_tuple)
-                    except RuntimeError as e:
-                        logger.error(e)
+                else:
+                    activity_tuple=(TimeUtils.getCurrentTime(),"")
+                # 写文件
+                try:
+                    with open(self.activity_file, 'a+',encoding="utf-8") as writer:
+                        writer_p = csv.writer(writer, lineterminator='\n')
+                        writer_p.writerow(activity_tuple)
+                except RuntimeError as e:
+                    logger.error(e)
                 time_consume = time.time() - before
                 delta_inter = self.interval - time_consume
                 logger.debug("get app activity time consumed: " + str(time_consume))
