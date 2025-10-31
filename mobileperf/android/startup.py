@@ -135,6 +135,8 @@ class StartUp(object):
         config_dic = self.check_config_option(config_dic, paser, "Common", "exceptionlog")
         config_dic = self.check_config_option(config_dic, paser, "Common", "save_path")
         config_dic = self.check_config_option(config_dic,paser,"Common","phone_log_path")
+        config_dic = self.check_config_option(config_dic, paser, "Common", "dingding_webhook")
+        config_dic = self.check_config_option(config_dic, paser, "Common", "dingding_mobiles")
 
         # 读取monkey配置
         config_dic = self.check_config_option(config_dic, paser, "Common", "monkey")
@@ -159,11 +161,16 @@ class StartUp(object):
                 if option == 'timeout':#timeout 的单位是分钟
                     config_dic[option] = (int)(parse.get(section, option))*60
                 if option in ["exceptionlog" ,"phone_log_path","space_size_check_path","package","pid_change_focus_package",
-                              "watcher_users","main_activity","activity_list"]:
+                              "watcher_users","main_activity","activity_list","dingding_mobiles"]:
                     if option == "activity_list" or option == "main_activity":
                         config_dic[option] = parse.get(section, option).strip().replace("\n","").split(";")
                     else:
-                        config_dic[option] = parse.get(section, option).split(";")
+                        # 对于分号分隔的配置，需要过滤空字符串
+                        value = parse.get(section, option).strip()
+                        if value:
+                            config_dic[option] = [v.strip() for v in value.split(";") if v.strip()]
+                        else:
+                            config_dic[option] = []
                 if option == 'monkey_disable_syskeys':
                     config_dic[option] = parse.get(section, option).lower() == 'true'
             except:#配置项中数值发生错误
@@ -173,12 +180,14 @@ class StartUp(object):
                 else:
                     config_dic[option] = ''
         else:#配置项没有配置
-            if option not in ['serialnum',"main_activity","activity_list","pid_change_focus_package","shell_file","monkey_disable_syskeys"]:
+            if option not in ['serialnum',"main_activity","activity_list","pid_change_focus_package","shell_file","monkey_disable_syskeys","dingding_webhook","dingding_mobiles"]:
                 logger.debug("config option error:" + option)
                 self._config_error()
             else:
                 if option == 'monkey_disable_syskeys':
                     config_dic[option] = False  # 默认不禁用系统按键
+                elif option == "dingding_mobiles":
+                    config_dic[option] = []  # 默认空列表
                 else:
                     config_dic[option] = ''
         return config_dic
@@ -300,7 +309,13 @@ class StartUp(object):
                         logger.error(e)
                 # logcat的代码可能会引起死锁，拎出来单独处理logcat
                 try:
-                    self.logcat_monitor = LogcatMonitor(self.serialnum, self.packages[0])
+                    # 获取钉钉webhook配置和手机号列表
+                    dingding_webhook = self.config_dic.get("dingding_webhook", "")
+                    dingding_mobiles = self.config_dic.get("dingding_mobiles", [])
+                    # 传入包名、钉钉webhook配置和手机号列表，用于实时异常通知
+                    self.logcat_monitor = LogcatMonitor(self.serialnum, self.packages[0], 
+                                                       dingding_webhook=dingding_webhook,
+                                                       dingding_mobiles=dingding_mobiles)
                     # 如果有异常日志标志，才启动这个模块
                     if self.exceptionlog_list:
                         self.logcat_monitor.set_exception_list(self.exceptionlog_list)
@@ -395,6 +410,9 @@ class StartUp(object):
                     logger.info("Generating summary report...")
                     Report(RuntimeData.package_save_path, self.packages)
                     logger.info("Summary report generated successfully")
+                    
+                    # 检查 exception.log 是否包含包名，如果包含则发送钉钉通知
+                    self._check_and_notify_exception()
             except Exception as e:
                 logger.error("Failed to generate report: %s" % e)
                 import traceback
@@ -494,6 +512,58 @@ class StartUp(object):
         #         release系统pull  /sdcard/mtklog/可以  没有权限/sdcard/mtklog/mobilelog
 
 
+    def _check_and_notify_exception(self):
+        """
+        检查 exception.log 是否包含包名，如果包含则发送钉钉通知
+        """
+        if not RuntimeData.package_save_path or not os.path.exists(RuntimeData.package_save_path):
+            return
+        
+        # 检查是否配置了钉钉 webhook
+        dingding_webhook = self.config_dic.get("dingding_webhook", "")
+        if not dingding_webhook:
+            logger.debug("DingDing webhook not configured, skip exception notification")
+            return
+        
+        # 检查 exception.log 文件是否存在
+        exception_file = os.path.join(RuntimeData.package_save_path, 'exception.log')
+        if not os.path.exists(exception_file):
+            logger.debug("exception.log not found, skip notification")
+            return
+        
+        # 获取包名（取第一个包名）
+        if not self.packages or len(self.packages) == 0:
+            logger.warning("No package specified, cannot check exception log")
+            return
+        
+        package = self.packages[0]
+        
+        try:
+            # 读取 exception.log 文件内容
+            with open(exception_file, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+            
+            # 检查是否包含包名
+            if package in content:
+                logger.info(f"Found package {package} in exception.log, sending DingDing notification...")
+                from mobileperf.common.dingding import DingDingNotifier
+                notifier = DingDingNotifier(dingding_webhook)
+                # 获取手机号列表
+                dingding_mobiles = self.config_dic.get("dingding_mobiles", [])
+                success = notifier.notify_exception(package, RuntimeData.package_save_path, exception_file, at_mobiles=dingding_mobiles)
+                if success:
+                    logger.info("DingDing notification sent successfully")
+                    if dingding_mobiles:
+                        logger.info(f"@人员: {', '.join(dingding_mobiles)}")
+                else:
+                    logger.error("Failed to send DingDing notification")
+            else:
+                logger.debug(f"Package {package} not found in exception.log, skip notification")
+        except Exception as e:
+            logger.error(f"Error checking exception.log for notification: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
     def save_device_info(self):
         device_file = os.path.join(RuntimeData.package_save_path,"device_test_info.txt")
         with open(device_file,"w+",encoding="utf-8") as writer:

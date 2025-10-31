@@ -13,6 +13,8 @@
 import os,sys,csv
 import re
 import time
+import threading
+import hashlib
 
 BaseDir=os.path.dirname(__file__)
 sys.path.append(os.path.join(BaseDir,'../..'))
@@ -27,11 +29,13 @@ from mobileperf.android.globaldata import RuntimeData
 class LogcatMonitor(Monitor):
     '''logcat监控器
     '''
-    def __init__(self, device_id, package=None, **regx_config):
+    def __init__(self, device_id, package=None, dingding_webhook=None, dingding_mobiles=None, **regx_config):
         '''构造器
         
         :param str device_id: 设备id
         :param list package : 监控的进程列表，列表为空时，监控所有进程
+        :param str dingding_webhook: 钉钉webhook地址，用于实时通知异常
+        :param list dingding_mobiles: 钉钉通知@的手机号列表，如 ['138xxxx8888', '139xxxx9999']
         :param dict regx_config : 日志匹配配置项{conf_id = regx}，如：AutoMonitor=ur'AutoMonitor.*:(.*), cost=(\d+)'
         '''
         super(LogcatMonitor, self).__init__(**regx_config)
@@ -42,6 +46,10 @@ class LogcatMonitor(Monitor):
         self.launchtime = LaunchTime(self.device_id, self.package)
         self.exception_log_list = []
         self.start_time = None
+        self.dingding_webhook = dingding_webhook  # 钉钉webhook配置
+        self.dingding_mobiles = dingding_mobiles if dingding_mobiles else []  # 钉钉通知@的手机号列表
+        self.test_package = package  # 当前测试的包名，用于检查异常日志
+        self.last_notification_time = {}  # 记录已发送通知的日志内容hash和发送时间，用于去重
 
         self.append_log_line_num = 0
         self.file_log_line_num = 0
@@ -96,20 +104,126 @@ class LogcatMonitor(Monitor):
         异常日志写一个文件
         :return:void
         '''
+        # 检查日志是否匹配任何异常标签
+        matched_tags = [tag for tag in self.exception_log_list if tag in log_line]
+        
+        if matched_tags:
+            logger.debug("exception Info: " + log_line)
+            tmp_file = os.path.join(RuntimeData.package_save_path, 'exception.log')
+            with open(tmp_file, 'a+',encoding="utf-8") as f:
+                f.write(log_line + '\n')
+            #     这个路径 空格会有影响
+            process_stack_log_file = os.path.join(RuntimeData.package_save_path, 'process_stack_%s_%s.log' % (
+            self.package, TimeUtils.getCurrentTimeUnderline()))
+            # 如果进程挂了，pid会变 ，抓变后进程pid的堆栈没有意义
+            # self.logmonitor.device.adb.get_process_stack(self.package,process_stack_log_file)
+            if RuntimeData.old_pid:
+                self.device.adb.get_process_stack_from_pid(RuntimeData.old_pid, process_stack_log_file)
+            
+            # 实时钉钉通知：如果异常日志中包含当前测试的包名，立即发送通知
+            # 去重策略：使用日志内容的hash作为key，5分钟内相同内容的日志只发送一次通知
+            if (self.test_package and 
+                self.dingding_webhook and 
+                self.test_package in log_line):
+                
+                # 使用日志内容的hash作为去重key（截取前200字符避免hash过长）
+                log_hash = hashlib.md5(log_line[:200].encode('utf-8')).hexdigest()
+                
+                # 检查是否需要发送通知（5分钟内不重复）
+                current_time = time.time()
+                last_notification_info = self.last_notification_time.get(log_hash, None)
+                time_interval = 300  # 5分钟（300秒）去重间隔
+                
+                should_send = True
+                if last_notification_info:
+                    last_time = last_notification_info.get('time', 0)
+                    if current_time - last_time < time_interval:
+                        should_send = False
+                        remaining_time = int(time_interval - (current_time - last_time))
+                        logger.debug(f"Skip duplicate notification (same content sent {remaining_time}s ago, min interval: {time_interval}s)")
+                
+                if should_send:
+                    # 更新最后通知时间
+                    self.last_notification_time[log_hash] = {
+                        'time': current_time,
+                        'tag': matched_tags[0]  # 使用第一个匹配的标签
+                    }
+                    # 使用第一个匹配的标签作为异常类型
+                    tag = matched_tags[0]
+                    # 异步发送通知，避免阻塞日志处理
+                    threading.Thread(target=self._send_dingding_notification_async, 
+                                   args=(log_line, tag), 
+                                   daemon=True).start()
+    
+    def _send_dingding_notification_async(self, log_line, exception_tag):
+        """
+        异步发送钉钉通知
+        :param str log_line: 异常日志内容
+        :param str exception_tag: 异常标签
+        """
+        try:
+            from mobileperf.common.dingding import DingDingNotifier
+            
+            if not self.dingding_webhook:
+                return
+            
+            notifier = DingDingNotifier(self.dingding_webhook)
+            
+            # 提取时间戳信息，使用带冒号的时间格式
+            current_time = time.strftime(TimeUtils.ColonFormatter, time.localtime(time.time()))
+            test_path = RuntimeData.package_save_path if RuntimeData.package_save_path else "未知路径"
+            
+            # 获取Web服务器地址
+            web_server_url = ""
+            try:
+                import socket
+                # 默认端口5000
+                web_port = 5000
+                try:
+                    hostname = socket.gethostname()
+                    ip = socket.gethostbyname(hostname)
+                    web_server_url = f"http://{ip}:{web_port}"
+                except:
+                    web_server_url = f"http://localhost:{web_port}"
+            except:
+                pass  # 如果获取失败，就不显示web地址
+            
+            # 构建通知内容，限制日志长度避免消息过长
+            log_preview = log_line[:500] if len(log_line) > 500 else log_line
+            title = f"🚨 实时异常提醒 - {self.test_package}"
+            
+            # 如果有web服务器地址，添加到消息中
+            web_url_text = ""
+            if web_server_url:
+                web_url_text = f"\n**Web查看**: {web_server_url}"
+            
+            content = f"""## {title}
 
-        for tag in self.exception_log_list:
-            if tag in log_line:
-                logger.debug("exception Info: " + log_line)
-                tmp_file = os.path.join(RuntimeData.package_save_path, 'exception.log')
-                with open(tmp_file, 'a+',encoding="utf-8") as f:
-                    f.write(log_line + '\n')
-                #     这个路径 空格会有影响
-                process_stack_log_file = os.path.join(RuntimeData.package_save_path, 'process_stack_%s_%s.log' % (
-                self.package, TimeUtils.getCurrentTimeUnderline()))
-                # 如果进程挂了，pid会变 ，抓变后进程pid的堆栈没有意义
-                # self.logmonitor.device.adb.get_process_stack(self.package,process_stack_log_file)
-                if RuntimeData.old_pid:
-                    self.device.adb.get_process_stack_from_pid(RuntimeData.old_pid, process_stack_log_file)
+**包名**: {self.test_package}
+**异常类型**: {exception_tag}
+**检测时间**: {current_time}{web_url_text}
+**异常日志**: 
+```
+{log_preview}
+```
+**测试路径**: `{test_path}`
+> ⚠️ monkey执行过程中检测到异常，请及时查看日志分析！！！
+"""
+            
+            # 如果配置了手机号列表，则@指定人员
+            at_mobiles = self.dingding_mobiles if self.dingding_mobiles else None
+            success = notifier.send_text_message(title, content, at_mobiles=at_mobiles, at_all=False)
+            if success:
+                logger.info(f"DingDing notification sent for exception: {exception_tag}")
+                if at_mobiles:
+                    logger.info(f"@人员: {', '.join(at_mobiles)}")
+            else:
+                logger.warning(f"Failed to send DingDing notification for exception: {exception_tag}")
+                
+        except Exception as e:
+            logger.error(f"Error sending DingDing notification: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
 
 
 class LaunchTime(object):
